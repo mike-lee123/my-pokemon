@@ -5,6 +5,7 @@
 """
 import json
 import random
+import re
 
 import streamlit as st
 
@@ -635,6 +636,7 @@ CSS = """
 .hptext{font-size:.85rem;opacity:.8}
 .tb{color:#fff;padding:1px 8px;border-radius:10px;font-size:.75rem;margin-right:4px;
     text-shadow:0 1px 1px rgba(0,0,0,.4)}
+.newline{background:rgba(255,213,0,.22);border-radius:4px;padding:0 4px}
 .battlelog{background:rgba(127,127,127,.08);border-left:4px solid #e3350d;padding:8px 12px;
     border-radius:6px;min-height:150px;font-size:.95rem;line-height:1.6}
 </style>
@@ -698,46 +700,57 @@ def render_battle():
         need = xp_need(m["lvl"])
         st.progress(min(1.0, m["xp"] / need), text=f"EXP {m['xp']} / {need}")
 
-    st.markdown(f"<div class='battlelog'>{'<br>'.join(b['log'][-8:])}</div>", unsafe_allow_html=True)
-    st.write("")
-
     if b["over"]:
         label = {"win": "勝利！繼續冒險", "catch": "太好了！繼續冒險", "run": "繼續冒險",
                  "lose": "回到寶可夢中心"}[b["result"]]
         st.button(label, on_click=leave_battle, type="primary", use_container_width=True)
-        return
-
-    if b["must_switch"]:
+    elif b["must_switch"]:
         st.warning("選擇下一隻上場的寶可夢：")
         render_switch_buttons()
-        return
+    else:
+        render_battle_actions(b, m, f)
+    render_battle_log(b)
 
-    st.markdown("**⚔️ 招式**")
+
+def render_battle_log(b):
+    """戰鬥訊息放在按鈕下方，本回合新增的訊息以黃色底標示。"""
+    lines = b["log"][-10:]
+    new_from = len(lines) - (len(b["log"]) - b.get("shown", 0))
+    html = []
+    for k, line in enumerate(lines):
+        line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
+        html.append(f"<div class='newline'>{line}</div>" if k >= new_from else f"<div>{line}</div>")
+    b["shown"] = len(b["log"])
+    st.markdown("**📜 戰鬥訊息**")
+    st.markdown(f"<div class='battlelog'>{''.join(html)}</div>", unsafe_allow_html=True)
+
+
+def render_battle_actions(b, m, f):
+    st.markdown("**⚔️ 招式**（點擊即攻擊）")
     cols = st.columns(2)
     for i, mv in enumerate(m["moves"]):
         t, p, acc = MOVES[mv]
         eff = effectiveness(t, types(f))
         hint = " ⬆️" if eff > 1 else " ⬇️" if 0 < eff < 1 else " ✖️" if eff == 0 else ""
         cols[i % 2].button(f"{mv}｜{t}｜威力{p}{hint}", key=f"mv{i}", on_click=act_move, args=(i,),
-                           use_container_width=True)
+                           type="primary", use_container_width=True)
 
-    t1, t2, t3 = st.tabs(["🎒 背包", "🔄 換寶可夢", "🏃 逃跑"])
-    with t1:
-        if b["kind"] == "wild":
-            bcols = st.columns(4)
-            for col, ball in zip(bcols, BALLS):
-                col.button(f"{ball} ×{S.bag.get(ball, 0)}", key=f"ball{ball}", on_click=act_ball,
-                           args=(ball,), disabled=S.bag.get(ball, 0) <= 0, use_container_width=True)
-        else:
-            st.caption("不能搶別人的寶可夢！")
-        hcols = st.columns(2)
-        for col, item in zip(hcols, ["傷藥", "全滿藥"]):
-            col.button(f"{item} ×{S.bag.get(item, 0)}", key=f"bi{item}", on_click=act_item, args=(item,),
-                       disabled=S.bag.get(item, 0) <= 0, use_container_width=True)
-    with t2:
+    st.markdown("**🎒 背包**（數量為 0 的道具無法使用）")
+    if b["kind"] == "wild":
+        bcols = st.columns(4)
+        for col, ball in zip(bcols, BALLS):
+            col.button(f"{ball} ×{S.bag.get(ball, 0)}", key=f"ball{ball}", on_click=act_ball,
+                       args=(ball,), disabled=S.bag.get(ball, 0) <= 0, use_container_width=True)
+    hcols = st.columns(3)
+    for col, item in zip(hcols, ["傷藥", "全滿藥"]):
+        col.button(f"{item} ×{S.bag.get(item, 0)}", key=f"bi{item}", on_click=act_item, args=(item,),
+                   disabled=S.bag.get(item, 0) <= 0, use_container_width=True)
+    hcols[2].button("🏃 逃跑", key="run", on_click=act_run, disabled=b["kind"] != "wild",
+                    use_container_width=True)
+
+    if len(S.party) > 1:
+        st.markdown("**🔄 換寶可夢**（會被對手攻擊一次）")
         render_switch_buttons()
-    with t3:
-        st.button("逃跑", on_click=act_run, disabled=b["kind"] != "wild")
 
 
 def render_switch_buttons():
